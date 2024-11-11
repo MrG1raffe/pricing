@@ -14,7 +14,7 @@ setup(
       'pandas',
       'dataclasses',
       'numba>=0.58.1',
-      'py_vollib'
+      'py_vollib>=1.0.0'
       'simulation @ git+https://github.com/MrG1raffe/simulation.git',
       'signature @ git+https://github.com/MrG1raffe/signature.git'
    ], #external packages as dependencies
