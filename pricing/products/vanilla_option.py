@@ -1,21 +1,22 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
-from numpy import float_
+from numpy import float_, complex_
 from scipy.stats import norm
 from typing import Union, Tuple, List
 from dataclasses import dataclass, asdict
+from scipy.special import roots_laguerre
 from math import ceil
 from tqdm import tqdm
 
 from simulation.monte_carlo import MonteCarlo
 from simulation.utility import to_numpy, DEFAULT_SEED
-
 from pricing.models.model import Model
 from pricing.models.analytic_model import AnalyticModel
 from pricing.models.characteristic_function_model import CharacteristicFunctionModel
+from pricing.models.monte_carlo_model import MonteCarloModel
 from pricing.models.model_params import ModelParams
-from pricing.utility import is_put, is_call, ENGIE_BLUE, ENGIE_GREEN, ENGIE_FOREST_GREEN, EDF_ORANGE
+from pricing.utility import is_put, is_call
 from pricing.volatility_surface.volatility_surface import black_iv, black_vanilla_price
 from pricing.products.product import Product
 
@@ -59,11 +60,12 @@ class VanillaOption(Product):
         """
         A generic method that calculates the vanilla option price in the given model with the given method.
 
-        :param model: a model used for pricing. If `method` == "cos", should be
-            inherited from `CharacteristicFunctionModel`.
-        :param method: a method used to price the product. Possible value: "cos" for the COS-method,
-            "lewis" for Lewis method, "mc" for Monte Carlo, "analytic" for explicit formulas if available,
-            "semi-analytic" for Bergomi-Guyon approximation.
+        :param model: a model used for pricing. If `method` == "lewis", should be
+            inherited from `CharacteristicFunctionModel`, if `method` == "mc", should be
+            inherited from `MonteCarloModel`, if `method` == "analytic", should be
+            inherited from `AnalyticModel`.
+        :param method: a method used to price the product. Possible values:
+            "lewis" for Lewis method, "mc" for Monte Carlo, "analytic" for explicit formulae if available.
         :param F0: initial value of the underlying price.
         :param is_vol_surface: whether to return the Black implied volatility value instead of option prices.
         :param pricing_params: an instance of pricing params dataclass corresponding to the chosen pricing method
@@ -72,22 +74,16 @@ class VanillaOption(Product):
         :return: price(s) of the vanilla option of shape consistent with the shape of `T`and `K`.
         """
         if method == 'mc':
-            return self._get_price_mc(model=model, F0=F0, is_vol_surface=is_vol_surface,
-                                      **asdict(pricing_params), **kwargs)
-        elif method == 'cos':
-            if isinstance(model, CharacteristicFunctionModel):
-                return to_numpy(model.get_vanilla_option_price_cos(
-                    T=self.T, K=self.K, F0=F0, flag=self.flag,
-                    is_vol_surface=is_vol_surface, **asdict(pricing_params),
-                    **kwargs
-                ))
+            if isinstance(model, MonteCarloModel):
+                return self._get_price_mc(model=model, F0=F0, is_vol_surface=is_vol_surface,
+                                          **asdict(pricing_params), **kwargs)
             else:
-                raise TypeError("A model should have an implemented characteristic function. "
-                                "Provide a model inherited from `CharacteristicFunctionModel`")
+                raise TypeError("A model should have an implemented trajectory simulation function. "
+                                "Provide a model inherited from `MonteCarloModel`")
         elif method == 'lewis':
             if isinstance(model, CharacteristicFunctionModel):
-                return to_numpy(model.get_vanilla_option_price_lewis(
-                    T=self.T, K=self.K, F0=F0, flag=self.flag,
+                return to_numpy(self._get_price_lewis(
+                    model=model, T=self.T, K=self.K, F0=F0, flag=self.flag,
                     is_vol_surface=is_vol_surface, **asdict(pricing_params),
                     **kwargs
                 ))
@@ -99,25 +95,14 @@ class VanillaOption(Product):
                 return model.get_vanilla_option_price_analytic(T=self.T, K=self.K, F0=F0, flag=self.flag,
                                                                is_vol_surface=is_vol_surface)
             else:
-                raise TypeError("A model should have an implemented characteristic function. "
+                raise TypeError("A model should have an implemented analytic pricing formulae. "
                                 "Provide a model inherited from `CharacteristicFunctionModel`")
-        elif method == 'semi-analytic':
-            log_mon = np.log(self.K / F0)
-            vol_atm, skew_atm, conv_atm = self.__semi_analytic_approximation(model, pricing_params)
-            vol_atm = np.reshape(vol_atm, (-1, 1))
-            skew_atm = np.reshape(skew_atm, (-1, 1))
-            conv_atm = np.reshape(conv_atm, (-1, 1))
-            iv = np.array(vol_atm + skew_atm * log_mon + conv_atm * log_mon**2)
-            if is_vol_surface:
-                return iv.squeeze()
-            else:
-                return self.black_vanilla_price(sigma=iv, F=F0, flag=self.flag).squeeze()
         else:
             raise ValueError("Not valid pricing method.")
 
     def _get_price_mc(
         self,
-        model: Model,
+        model: MonteCarloModel,
         F0: Union[float, NDArray[float_]],
         is_vol_surface: bool = False,
         size: int = 10**5,
@@ -182,8 +167,6 @@ class VanillaOption(Product):
         lower_bound, upper_bound = prices - price_accuracy, prices + price_accuracy
 
         if is_vol_surface:
-            if "is_kemna_vorst" in model.__dict__ and not model.is_kemna_vorst:
-                F0 = (F0 @ np.diff(model.kemna_vorst_grid)) / (model.kemna_vorst_grid[-1] - model.kemna_vorst_grid[0])
             prices = black_iv(option_price=prices, T=self.T, K=self.K, F=F0, r=0, flag=self.flag)
             lower_bound = black_iv(option_price=lower_bound, T=self.T, K=self.K, F=F0, r=0, flag=self.flag)
             upper_bound = black_iv(option_price=upper_bound, T=self.T, K=self.K, F=F0, r=0, flag=self.flag)
@@ -193,27 +176,46 @@ class VanillaOption(Product):
         else:
             return prices.squeeze()
 
-    def __semi_analytic_approximation(
-        self,
-        model: Model,
-        pricing_params: ModelParams
+    def _get_price_lewis(
+            self,
+            model: CharacteristicFunctionModel,
+            T: Union[float, NDArray[float_]],
+            K: Union[float, NDArray[float_]],
+            F0: float,
+            is_vol_surface: bool = False,
+            N_points: int = 30,
+            control_variate_sigma: float = 0.4,
+            **kwargs
     ):
-        """
-        Calculates the ATM vol, skew, and convexity via the Bergomi-Guyon approximation.
+        flag = self.flag
+        T = np.reshape(T, (-1))
+        if T.shape != (T.size,):
+            raise ValueError("`T` should be a float or a one-dimensional array.")
+        K = to_numpy(K)
+        prices = np.zeros((T.size, K.shape[-1]))
 
-        :param model: price model to get the expansion coefficients.
-        :param pricing_params: parameters used to calculate the expansion coefficients.
-        :return: A tuple containing the ATM volatility, ATM skew, and ATM convexity arrays which elements
-            correspond to the maturities of self.
-        """
-        C_x_xi, C_xi_xi, C_mu, v, vol_of_vol = model.get_vol_expansion_coefficients(self.T, **asdict(pricing_params))
-        vol_atm = np.sqrt(v / self.T) + C_x_xi / (4 * np.sqrt(v * self.T)) * vol_of_vol + \
-            (12 * C_x_xi**2 - C_xi_xi * v * (v + 4) + 4 * C_mu * v * (v - 4)) / \
-            (32 * v**2.5 * np.sqrt(self.T)) * vol_of_vol**2
-        skew_atm = C_x_xi / (2 * v**1.5 * np.sqrt(self.T)) * vol_of_vol + \
-            (4 * C_mu * v - 3 * C_x_xi**2) / (8 * v**2.5 * np.sqrt(self.T)) * vol_of_vol**2
-        conv_atm = (4 * C_mu * v + C_xi_xi * v - 6 * C_x_xi**2) / (8 * v**3.5 * np.sqrt(self.T)) * vol_of_vol**2
-        return vol_atm, skew_atm, conv_atm
+        def black_cf(u: NDArray[complex_], T: float):
+            return np.exp(-0.5 * control_variate_sigma ** 2 * (u ** 2 + 1j * u) * T)
+
+        for i, maturity in enumerate(T):
+            strikes = K[i] if len(K.shape) == 2 else K
+            k = np.log(F0 / strikes)
+            z_arr, w_arr = roots_laguerre(n=N_points)
+
+            z_arr = np.reshape(z_arr, (-1, 1))
+            integrand_arr = (np.exp(1j * (z_arr - 1j / 2) * k.reshape((1, -1))) * (
+                    model.characteristic_function(T=maturity, x=0, u1=z_arr - 1j / 2, **kwargs).reshape((-1, 1)) -
+                    black_cf(u=z_arr - 1j / 2, T=maturity)
+            ) / (z_arr ** 2 + 0.25)).real
+            integral = (w_arr * np.exp(z_arr.squeeze())) @ integrand_arr
+
+            prices[i] = black_vanilla_price(sigma=control_variate_sigma, T=maturity, K=strikes, F=F0, r=0, flag='c') - \
+                        strikes / np.pi * integral
+            if is_put(flag):
+                prices[i] += strikes - F0
+            if is_vol_surface:
+                prices[i] = black_iv(option_price=prices[i], T=maturity, K=strikes, F=F0, r=0, flag=flag)
+        return prices.squeeze()
 
     def black_iv(
             self,
@@ -318,18 +320,18 @@ class VanillaOption(Product):
             title_option = f'option={option_name}' if option_name is not None else ""
             if option_prices_market is not None:
                 if option_prices_market is not None:
-                    ax.plot(log_mon, iv_market[i], 'v--', color=EDF_ORANGE, label="market")
+                    ax.plot(log_mon, iv_market[i], 'v--', color="r", label="market")
                 if bid_ask_spread is not None:
                     ax.fill_between(log_mon, iv_market[i] - 0.5 * np.array(bid_ask_spread[i]),
-                                    iv_market[i] + 0.5 * np.array(bid_ask_spread[i]), color=EDF_ORANGE,
+                                    iv_market[i] + 0.5 * np.array(bid_ask_spread[i]), color="r",
                                     label="bid-ask", alpha=0.2)
-            ax.plot(log_mon, iv_model[i], 'v--', ms=4, color=ENGIE_BLUE, label="model")
+            ax.plot(log_mon, iv_model[i], 'v--', ms=4, label=f"T = {np.round(maturity, 2)}")
             if option_prices_low_model is not None:
-                ax.fill_between(log_mon, iv_model_low[i],
-                                iv_model_up[i], color=ENGIE_BLUE,
+                ax.fill_between(log_mon, iv_model_low[i], iv_model_up[i],
                                 label="MC confidence intervals", alpha=0.2)
 
             ax.grid('on')
             ax.legend()
             ax.set_xlabel(r'$\log(K / F0)$')
-            ax.set_title(title_option + f' and TTM={np.round(maturity, 2)}')
+            ax.set_title(title_option + f' TTM={np.round(maturity, 2)}')
+
