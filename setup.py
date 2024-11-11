@@ -13,6 +13,7 @@ setup(
       'scipy',
       'pandas',
       'dataclasses',
+      'matplotlib',
       'numba>=0.58.1',
       'py_vollib>=1.0.0',
       'simulation @ git+https://github.com/MrG1raffe/simulation.git',
