@@ -3,7 +3,7 @@ from typing import Union
 from numpy.typing import NDArray
 from numpy import float_
 
-from pricing.models.model import Model
+from .model import Model
 
 
 class AnalyticModel(Model):

@@ -11,14 +11,14 @@ from tqdm import tqdm
 
 from simulation.monte_carlo import MonteCarlo
 from simulation.utility import to_numpy, DEFAULT_SEED
-from pricing.models.model import Model
-from pricing.models.analytic_model import AnalyticModel
-from pricing.models.characteristic_function_model import CharacteristicFunctionModel
-from pricing.models.monte_carlo_model import MonteCarloModel
-from pricing.models.model_params import ModelParams
-from pricing.utility import is_put, is_call
-from pricing.volatility_surface.volatility_surface import black_iv, black_vanilla_price
-from pricing.products.product import Product
+from ..models.model import Model
+from ..models.analytic_model import AnalyticModel
+from ..models.characteristic_function_model import CharacteristicFunctionModel
+from ..models.monte_carlo_model import MonteCarloModel
+from ..models.model_params import ModelParams
+from ..utility import is_put, is_call
+from ..volatility_surface.volatility_surface import black_iv, black_vanilla_price
+from ..products.product import Product
 
 
 @dataclass

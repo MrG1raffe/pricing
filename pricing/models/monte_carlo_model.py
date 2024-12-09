@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from numpy import float_
 from typing import Union, Tuple
 
-from pricing.models.model import Model
+from .model import Model
 
 
 class MonteCarloModel(Model):

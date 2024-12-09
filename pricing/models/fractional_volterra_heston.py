@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from math import ceil
 from numba import jit, prange
 
-from pricing.models.characteristic_function_model import CharacteristicFunctionModel
+from .characteristic_function_model import CharacteristicFunctionModel
 from simulation.utility import to_numpy
 
 

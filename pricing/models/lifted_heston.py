@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from math import ceil, gamma
 from numba import jit, prange
 
-from pricing.models.heston import Heston, _jit_heston_riccati_func
+from .heston import Heston, _jit_heston_riccati_func
 from simulation.diffusion import Diffusion
 from simulation.utility import DEFAULT_SEED, to_numpy
 

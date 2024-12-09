@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from math import ceil
 from numba import jit, prange
 
-from pricing.models.characteristic_function_model import CharacteristicFunctionModel
-from pricing.models.monte_carlo_model import MonteCarloModel
+from .characteristic_function_model import CharacteristicFunctionModel
+from .monte_carlo_model import MonteCarloModel
 from simulation.diffusion import Diffusion
 from simulation.utility import DEFAULT_SEED, to_numpy
 

@@ -3,7 +3,7 @@ from numpy.typing import NDArray
 from numpy import complex_
 from dataclasses import dataclass
 
-from pricing.models.model import Model
+from .model import Model
 
 
 @dataclass

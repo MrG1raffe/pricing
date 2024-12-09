@@ -7,11 +7,11 @@ from numpy import float_, complex_
 
 from simulation.diffusion import Diffusion
 from simulation.utility import to_numpy
-from pricing.models.monte_carlo_model import MonteCarloModel
-from pricing.models.analytic_model import AnalyticModel
-from pricing.models.characteristic_function_model import CharacteristicFunctionModel
-from pricing.utility import is_put, is_call
-from pricing.volatility_surface.volatility_surface import black_iv
+from .monte_carlo_model import MonteCarloModel
+from .analytic_model import AnalyticModel
+from .characteristic_function_model import CharacteristicFunctionModel
+from ..utility import is_put, is_call
+from ..volatility_surface.volatility_surface import black_iv
 
 
 @dataclass

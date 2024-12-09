@@ -5,7 +5,7 @@ from scipy.stats import norm
 from numpy import float_
 from typing import Union, Callable
 
-from pricing.utility import is_put, is_call
+from ..utility import is_put, is_call
 from simulation.utility import to_numpy
 
 PATH_TO_SITE_PACKAGES = 'C:\\Users\\DM6579\\Anaconda3\\envs\\SmileHJM\\Lib\\site-packages'
