@@ -14,6 +14,7 @@ from signature.signature.stationary_signature import G, stationary_signature_fro
 from simulation.diffusion import Diffusion
 from simulation.utility import DEFAULT_SEED, to_numpy
 from .characteristic_function_model import CharacteristicFunctionModel
+from .monte_carlo_model import MonteCarloModel
 
 
 @dataclass

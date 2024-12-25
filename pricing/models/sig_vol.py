@@ -11,13 +11,15 @@ from math import ceil
 # TODO: remove second "signature" for usage
 from signature.signature.tensor_sequence import TensorSequence
 from signature.signature.tensor_algebra import TensorAlgebra, Alphabet
+from signature.signature.shuffle_operator import ShuffleOperator
 from simulation.diffusion import Diffusion
 from simulation.utility import DEFAULT_SEED, to_numpy
 from .characteristic_function_model import CharacteristicFunctionModel
+from .monte_carlo_model import MonteCarloModel
 
 
 @dataclass
-class SigVol(CharacteristicFunctionModel):
+class SigVol(CharacteristicFunctionModel, MonteCarloModel):
     vol_ts: TensorSequence
     ta: TensorAlgebra
     rho: float
@@ -51,10 +53,7 @@ class SigVol(CharacteristicFunctionModel):
         timestep = min(cf_timestep, T / 10)
         t_grid = np.linspace(0, T, ceil(T / timestep) + 1)
 
-        t1 = time.perf_counter()
-        res = jit_parallel_char_func(t_grid=t_grid, u_arr=u_arr, vol_ts=self.vol_ts,
-                                     trunc=2 * self.vol_ts.trunc, rho=self.rho)
-        t2 = time.perf_counter()
+        res = jit_char_func(t_grid=t_grid, u_arr=u_arr, vol_ts=self.vol_ts, shuop=self.ta.shuop, rho=self.rho)
         res *= np.exp(u_arr * x)
         return np.reshape(res, u_shape)
 
@@ -95,6 +94,7 @@ class SigVol(CharacteristicFunctionModel):
         F0: Union[float, NDArray[float64]],
         rng: np.random.Generator = None,
         return_vol: bool = False,
+        **kwargs
     ) -> Union[NDArray[float64], Tuple[NDArray[float64], ...]]:
         """
         Simulates the underlying price trajectories on the given time grid.
@@ -133,47 +133,32 @@ class SigVol(CharacteristicFunctionModel):
         return F_traj
 
 
-@jit(parallel=True, nopython=True)
-def jit_parallel_char_func(
-    t_grid: NDArray[float64],
-    u_arr: NDArray[complex128],
-    vol_ts: TensorSequence,
-    trunc: int,
-    rho: float
-) -> NDArray[complex128]:
-    cf_arr = np.zeros(len(u_arr), dtype=complex128)
-    vol_ts_shuffle_squared = vol_ts.shuffle_pow(2, trunc)
-    for i in prange(len(u_arr)):
-        cf_arr[i] = np.reshape(jit_char_func(t_grid=t_grid, u=u_arr[i], vol_ts=vol_ts,
-                                             vol_ts_shuffle_squared=vol_ts_shuffle_squared, trunc=trunc, rho=rho), ())
-        if np.isinf(cf_arr[i]) or np.isnan(cf_arr[i]):
-            cf_arr[i] = 0
-    return cf_arr
-
-
 @jit(nopython=True)
 def jit_char_func(
     t_grid: NDArray[float64],
-    u: complex,
+    u_arr: NDArray[complex128],
     vol_ts: TensorSequence,
-    vol_ts_shuffle_squared: TensorSequence,
-    trunc: int,
+    shuop: ShuffleOperator,
     rho: float
-) -> complex128:
+) -> NDArray[complex128]:
+
+    trunc = vol_ts.trunc
     dt = np.diff(t_grid)
 
-    psi = TensorSequence(Alphabet(2), trunc, np.zeros(1), np.zeros(1))
-    psi_pred = TensorSequence(Alphabet(2), trunc, np.zeros(1), np.zeros(1))
+    alphabet = Alphabet(2)
+    psi = TensorSequence(alphabet, trunc, np.zeros((alphabet.number_of_elements(trunc), u_arr.size)))
+    psi_pred = TensorSequence(alphabet, trunc, np.zeros((alphabet.number_of_elements(trunc), u_arr.size)))
 
-    vol_shuffle_squared = vol_ts_shuffle_squared * (0.5 * (u**2 - u))
+    u_arr = np.reshape(u_arr, (1, u_arr.size, 1))
 
+    vol_shuffle_squared = shuop.shuffle_prod(vol_ts, vol_ts) * (0.5 * (u_arr ** 2 - u_arr))
     for i in range(len(dt)):
-        f_psi = jit_riccati_func(psi, vol_ts, vol_shuffle_squared, u, rho)
-        f_psi_pred = jit_riccati_func(psi_pred, vol_ts, vol_shuffle_squared, u, rho)
+        f_psi = jit_riccati_func(psi, vol_ts, vol_shuffle_squared, shuop, u_arr, rho)
+        f_psi_pred = jit_riccati_func(psi_pred, vol_ts, vol_shuffle_squared, shuop, u_arr, rho)
         psi_pred.update(psi + f_psi * dt[i])
         psi.update(psi + (f_psi_pred + f_psi) * (dt[i] / 2))
 
-    return np.exp(psi[""])
+    return np.exp(psi[""][:, 0])
 
 
 @jit(nopython=True)
@@ -181,8 +166,10 @@ def jit_riccati_func(
     psi: TensorSequence,
     vol_ts: TensorSequence,
     vol_shuffle_squared: TensorSequence,
-    u: complex,
+    shuop: ShuffleOperator,
+    u_arr: NDArray[complex128],
     rho: float
 ):
-    return psi.proj("2").shuffle_pow(2) / 2 + vol_ts.shuffle_prod(psi.proj("2")) * (u * rho) + \
+    psi_proj_2 = psi.proj("2")
+    return shuop.shuffle_prod_2d(psi_proj_2, psi_proj_2 / 2 + vol_ts * (u_arr * rho)) + \
            psi.proj("22") / 2 + psi.proj("1") + vol_shuffle_squared

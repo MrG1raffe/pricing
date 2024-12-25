@@ -30,7 +30,33 @@ class Calibration:
         model_params_dict = self.calibration_parameters.vector_to_params(x)
         self.model.update_params(model_params_dict)
 
-    def loss(self, x):
+    def loss_iv(self, x):
+        """
+
+        """
+        loss = 0
+        self.update_model_parameters(x)
+        for md in self.market_data_array:
+            if isinstance(md, MarketDataVanilla) and isinstance(md.product, VanillaOption):
+                K_shape = md.product.K.shape
+                try:
+                    iv_model = np.reshape(
+                        md.product.get_price(
+                            model=self.model,
+                            method=self.calibration_parameters.pricing_method,
+                            F0=self.F0,
+                            is_vol_surface=True,
+                            **asdict(self.calibration_parameters.pricing_params)
+                        ),
+                        K_shape
+                    )[-1]
+                except Exception as e:
+                    return 1
+                iv_mkt = np.reshape(md.implied_volatility, K_shape)[-1]
+                loss += np.mean((iv_model - iv_mkt) ** 2)
+        return loss
+
+    def loss_price(self, x):
         """
 
         """
@@ -70,7 +96,7 @@ class Calibration:
         :param x0: Initial value. By default, take the initial value given by `self.get_initial_guess`.
         """
         def loss_fun(x):
-            return self.loss(x=x)
+            return self.loss_iv(x=x)
 
         if x0 is not None and len(x0) != len(self.calibration_parameters.bounds):
             raise ValueError(f"Inconsistent dimensions of x0 ({len(x0)}) and "
