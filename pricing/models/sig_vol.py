@@ -1,9 +1,7 @@
-import time
-
 import numpy as np
 from numpy.typing import NDArray
 from numpy import float64, complex128
-from numba import jit, prange
+from numba import jit
 from dataclasses import dataclass
 from typing import Union, Tuple
 from math import ceil
@@ -52,7 +50,6 @@ class SigVol(CharacteristicFunctionModel, MonteCarloModel):
 
         timestep = min(cf_timestep, T / 10)
         t_grid = np.linspace(0, T, ceil(T / timestep) + 1)
-
         res = jit_char_func(t_grid=t_grid, u_arr=u_arr, vol_ts=self.vol_ts, shuop=self.ta.shuop, rho=self.rho)
         res *= np.exp(u_arr * x)
         return np.reshape(res, u_shape)
@@ -62,7 +59,8 @@ class SigVol(CharacteristicFunctionModel, MonteCarloModel):
         t_grid: NDArray[float64],
         size: int,
         rng: np.random.Generator = None,
-        B_traj: NDArray[float64] = None
+        B_traj: NDArray[float64] = None,
+        return_sig: bool = False
     ) -> NDArray[float64]:
         """
         Simulate the variance and the factor processes on the given time grid.
@@ -85,7 +83,10 @@ class SigVol(CharacteristicFunctionModel, MonteCarloModel):
         path = np.zeros((t_grid.size, 2, size))
         path[:, 0, :] = np.reshape(t_grid, (-1, 1))
         path[:, 1, :] = B_traj.T
-        return np.real(self.ta.path_to_sequence(path=path, trunc=self.vol_ts.trunc) @ self.vol_ts).T
+        B_Sig = self.ta.path_to_sequence(path=path, trunc=self.vol_ts.trunc)
+        if return_sig:
+            return np.real(B_Sig @ self.vol_ts).T, B_Sig
+        return np.real(B_Sig @ self.vol_ts).T
 
     def get_price_trajectory(
         self,
@@ -94,6 +95,8 @@ class SigVol(CharacteristicFunctionModel, MonteCarloModel):
         F0: Union[float, NDArray[float64]],
         rng: np.random.Generator = None,
         return_vol: bool = False,
+        return_bm: bool = False,
+        return_sig: bool = False,
         **kwargs
     ) -> Union[NDArray[float64], Tuple[NDArray[float64], ...]]:
         """
@@ -120,17 +123,23 @@ class SigVol(CharacteristicFunctionModel, MonteCarloModel):
 
         dt = np.diff(t_grid)
         dW_traj = np.diff(brownian_motion[:, 0, :], axis=1)  # shape (size, n_hist_factors, len(t_grid)-1)
-        B_traj = brownian_motion[:, 1, :]  # shape (size, len(t_grid))
+        B_traj = brownian_motion[:, 1, :]                    # shape (size, len(t_grid))
 
-        vol_traj = self.get_vol_trajectory(t_grid=t_grid, size=size, B_traj=B_traj)
+        vol_traj, B_Sig = self.get_vol_trajectory(t_grid=t_grid, size=size, B_traj=B_traj, return_sig=True)
 
         log_F_traj = np.log(F0) * np.ones((size, len(t_grid)))
         log_F_traj[:, 1:] += np.cumsum(dW_traj * vol_traj[:, :-1] - 0.5 * dt * vol_traj[:, :-1]**2, axis=1)
         F_traj = np.exp(log_F_traj)
 
+        result = (F_traj,)
         if return_vol:
-            return F_traj, vol_traj
-        return F_traj
+            result = result + (vol_traj,)
+        if return_bm:
+            result = result + (brownian_motion,)
+        if return_sig:
+            result = result + (B_Sig,)
+
+        return result
 
 
 @jit(nopython=True)
@@ -155,6 +164,7 @@ def jit_char_func(
     for i in range(len(dt)):
         f_psi = jit_riccati_func(psi, vol_ts, vol_shuffle_squared, shuop, u_arr, rho)
         f_psi_pred = jit_riccati_func(psi_pred, vol_ts, vol_shuffle_squared, shuop, u_arr, rho)
+
         psi_pred.update(psi + f_psi * dt[i])
         psi.update(psi + (f_psi_pred + f_psi) * (dt[i] / 2))
 
