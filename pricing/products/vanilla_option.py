@@ -154,8 +154,7 @@ class VanillaOption(Product):
         if rng is None:
             rng = np.random.default_rng(seed=DEFAULT_SEED)
         for i in tqdm(range(n_batch)):
-            F_T = model.get_price_trajectory(t_grid=t_grid, size=batch_size, F0=F0,
-                                             rng=rng, **kwargs)[:, maturities_idx]
+            F_T = model.get_price_trajectory(t_grid=t_grid, size=batch_size, F0=F0, rng=rng, **kwargs)[:, maturities_idx]
             F_T = np.reshape(F_T, (batch_size, self.T.size))
             if i == 0:
                 mc = MonteCarlo(batch=payoff(F_T, self.K), confidence_level=confidence_level)

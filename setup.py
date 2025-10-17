@@ -18,6 +18,5 @@ setup(
       'py_vollib>=1.0.0',
       'tqdm',
       'simulation @ git+https://github.com/MrG1raffe/simulation.git'
-      #'signature @ git+https://github.com/MrG1raffe/signature.git'
    ],
 )
