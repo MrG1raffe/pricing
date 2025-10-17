@@ -167,8 +167,9 @@ class VanillaOption(Product):
 
         if is_vol_surface:
             prices = black_iv(option_price=prices, T=self.T, K=self.K, F=F0, r=0, flag=self.flag)
-            lower_bound = black_iv(option_price=lower_bound, T=self.T, K=self.K, F=F0, r=0, flag=self.flag)
-            upper_bound = black_iv(option_price=upper_bound, T=self.T, K=self.K, F=F0, r=0, flag=self.flag)
+            if return_accuracy:
+                lower_bound = black_iv(option_price=lower_bound, T=self.T, K=self.K, F=F0, r=0, flag=self.flag)
+                upper_bound = black_iv(option_price=upper_bound, T=self.T, K=self.K, F=F0, r=0, flag=self.flag)
 
         if return_accuracy:
             return prices.squeeze(), lower_bound.squeeze(), upper_bound.squeeze()
